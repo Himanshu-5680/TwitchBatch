@@ -1,0 +1,1409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TwitchBatch</title>
+<meta name="description" content="Upload a Word file, pick one quality, and download every Twitch link onto this computer.">
+<meta name="theme-color" content="#0E0E10">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 28'%3E%3Cpath fill='%239146FF' d='M4.5 0 1 4.5v19h6V28l4.5-4.5h3.5L23 15V0zm16 14.5-3.5 3.5h-5L8.5 21.5V18H6V2.5h14.5z'/%3E%3Cpath fill='%23FFFFFF' d='M16 6.5h2V12h-2zm-5 0h2V12h-2z'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,700;1,700&family=JetBrains+Mono:wght@500;700;800&family=Space+Grotesk:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0E0E10;
+  --panel: #18181B;
+  --card: #18181B;
+  --ink: #FFFFFF;
+  --muted: #ADADB8;
+  --purple: #9146FF;
+  --purple-dark: #772CE8;
+  --green: #00F593;
+  --yellow: #FFB800;
+  --red: #FF4F4D;
+  --black: #000000;
+  --card-border: #F4F4F5; /* Crisp distinguishing border in Dark Mode */
+  --font-twitch: 'Chakra Petch', sans-serif;
+  --font-body: 'Space Grotesk', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #F4F4F0;
+  --panel: #FFFFFF;
+  --card: #FFFFFF;
+  --ink: #0E0E10;
+  --muted: #3D3650;
+  --card-border: #000000; /* Crisp black border in Light Mode */
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 500 16px/1.6 var(--font-body);
+}
+
+a {
+  color: var(--green);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+:root[data-theme="light"] a {
+  color: var(--purple);
+}
+
+img, svg {
+  display: block;
+}
+
+.w {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.skip {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  background: var(--green);
+  color: #000;
+  padding: 8px 14px;
+  font-family: var(--font-twitch);
+  font-weight: 700;
+  border: 3px solid #000;
+  z-index: 100;
+}
+.skip:focus {
+  left: 10px;
+  top: 10px;
+}
+
+/* =========================================================
+   REUSABLE 3D NEOBRUTALIST CUBE SYSTEM (360px × 360px)
+   WITH ULTRA-SMOOTH POP-DOWN ANIMATION & DISTINCT BORDER
+   ========================================================= */
+.cube-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.cube-neobrutal-wrapper {
+  position: relative;
+  width: 360px;
+  height: 360px;
+  background-color: #9146FF;
+  border: 3px solid var(--card-border);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.cube-card {
+  width: 100%;
+  height: 100%;
+  background-color: var(--card);
+  color: var(--ink);
+  border: 3px solid var(--card-border);
+  margin: -3px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  will-change: transform;
+  backface-visibility: hidden;
+  transform: translate3d(-7px, -7px, 0);
+  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+
+/* Smooth Pop-Down Animation on Hover */
+.cube-neobrutal-wrapper:hover .cube-card {
+  transform: translate3d(-2px, -2px, 0);
+}
+
+.cube-neobrutal-wrapper:active .cube-card {
+  transform: translate3d(0px, 0px, 0);
+  transition-duration: 0.12s;
+}
+
+.cube-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 3px solid var(--card-border);
+  padding-bottom: 12px;
+}
+
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-twitch);
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-shadow: 2px 2px 0px #9146FF;
+}
+
+.status-badge {
+  background-color: var(--green);
+  color: #000000;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 8px;
+  border: 2px solid #000000;
+  box-shadow: 3px 3px 0px #000000;
+  text-transform: uppercase;
+}
+
+.vod-info-box {
+  background-color: var(--bg);
+  border: 2px solid #9146FF;
+  padding: 12px;
+  box-shadow: 4px 4px 0px #000000;
+}
+
+.vod-label {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vod-filename {
+  font-family: var(--font-twitch);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vod-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.meta-tag {
+  background-color: #9146FF;
+  color: #FFFFFF;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border: 1.5px solid #000000;
+}
+
+.cube-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 2px dashed #3A3A3D;
+}
+
+.batch-counter {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.batch-counter strong {
+  color: #9146FF;
+  font-size: 14px;
+}
+
+/* =========================================================
+   HEADER & BOXLESS 3D POP-UP TWITCH LOGO (UPGRADED LIGHT MODE)
+   ========================================================= */
+.top {
+  background: var(--panel);
+  border-bottom: 3px solid #000000;
+  box-shadow: 0 4px 0 #9146FF;
+  position: sticky;
+  top: 0;
+  z-index: 25;
+}
+
+.top .w {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 72px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Boxless Twitch Glitch Wrapper — Only the Logo pops UP */
+.twitch-neobrutal-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 44px;
+  cursor: pointer;
+  overflow: visible;
+}
+
+.twitch-svg {
+  width: 38px;
+  height: 40px;
+  overflow: visible;
+}
+
+.mini-twitch-icon {
+  width: 26px;
+  height: 28px;
+  overflow: visible;
+}
+
+/* 3D Extrusion Base */
+.twitch-base-layer {
+  fill: #9146FF;
+  transition: fill 0.25s ease;
+}
+
+/* Front Pop-out Group (Logo keeps its signature Pop-UP on hover) */
+.twitch-pop-group {
+  will-change: transform;
+  backface-visibility: hidden;
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Smooth Pop-UP on Hover (Only for Logo) */
+.logo:hover .twitch-pop-group,
+.twitch-neobrutal-wrapper:hover .twitch-pop-group,
+.cube-neobrutal-wrapper:hover .twitch-pop-group {
+  transform: translate3d(4.5px, -4.5px, 0);
+}
+
+.logo:active .twitch-pop-group,
+.twitch-neobrutal-wrapper:active .twitch-pop-group {
+  transform: translate3d(1.5px, -1.5px, 0);
+  transition-duration: 0.1s;
+}
+
+/* DARK MODE LOGO: Purple Outer Frame + Crisp White Face + Purple Eyes */
+.twitch-shell {
+  fill: #9146FF;
+  transition: fill 0.25s ease;
+}
+.twitch-face {
+  fill: #FFFFFF;
+  transition: fill 0.25s ease;
+}
+.twitch-eye {
+  fill: #9146FF;
+  transform-box: fill-box;
+  transform-origin: center;
+  will-change: transform;
+  transition: fill 0.25s ease;
+}
+
+/* LIGHT MODE LOGO UPGRADE: Bold Black Outer Frame + Vibrant Purple Face + Crisp White Eyes + Neon Green 3D Depth */
+:root[data-theme="light"] .twitch-base-layer {
+  fill: #000000;
+}
+:root[data-theme="light"] .logo:hover .twitch-base-layer,
+:root[data-theme="light"] .cube-neobrutal-wrapper:hover .twitch-base-layer {
+  fill: #9146FF;
+}
+:root[data-theme="light"] .twitch-shell {
+  fill: #000000;
+}
+:root[data-theme="light"] .twitch-face {
+  fill: #9146FF;
+}
+:root[data-theme="light"] .twitch-eye {
+  fill: #FFFFFF;
+}
+:root[data-theme="light"] .logo:hover .twitch-eye,
+:root[data-theme="light"] .cube-neobrutal-wrapper:hover .twitch-eye {
+  fill: #00F593;
+}
+
+/* Double Blink Animation on Hover */
+.logo:hover .twitch-eye,
+.twitch-neobrutal-wrapper:hover .twitch-eye,
+.cube-neobrutal-wrapper:hover .twitch-eye {
+  animation: eye-blink 0.65s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes eye-blink {
+  0%, 100% { transform: scaleY(1); }
+  20%      { transform: scaleY(0.08); }
+  40%      { transform: scaleY(1); }
+  65%      { transform: scaleY(0.08); }
+  85%      { transform: scaleY(1); }
+}
+
+.word {
+  font-family: var(--font-twitch);
+  font-weight: 700;
+  font-size: 26px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-shadow: 2px 2px 0px #9146FF;
+}
+
+.top nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* NEOBRUTALIST BUTTONS (SMOOTH POP-DOWN ANIMATION) */
+.ui-btn, .neobrutal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  background-color: #FFFFFF;
+  color: #000000;
+  font-family: var(--font-twitch);
+  font-weight: 700;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 2px solid var(--card-border);
+  box-shadow: 4px 4px 0px #9146FF;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  will-change: transform, box-shadow;
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.26s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.18s ease;
+}
+
+/* Smooth Pop-Down on Hover */
+.ui-btn:hover, .neobrutal-btn:hover {
+  background-color: var(--green);
+  color: #000000;
+  border-color: #000000;
+  transform: translate3d(2.5px, 2.5px, 0);
+  box-shadow: 1.5px 1.5px 0px #9146FF;
+}
+
+/* Full Press on Click */
+.ui-btn:active, .neobrutal-btn:active {
+  transform: translate3d(4px, 4px, 0);
+  box-shadow: 0px 0px 0px #9146FF;
+  transition-duration: 0.1s;
+}
+
+.ui-btn-outline {
+  background-color: var(--panel);
+  color: var(--ink);
+}
+
+.top nav a.on {
+  background-color: var(--green);
+  color: #000000;
+  border-color: #000000;
+}
+
+.note {
+  background: var(--green);
+  color: #000000;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  border-bottom: 3px solid #000000;
+  text-transform: uppercase;
+}
+.note .w {
+  padding: 8px 20px;
+}
+
+/* =========================================================
+   HERO & MAIN DOWNLOADER TOOL
+   ========================================================= */
+.hero, .ph {
+  background: #9146FF;
+  background-image: radial-gradient(#000000 1.25px, transparent 1.25px);
+  background-size: 18px 18px;
+  color: #FFFFFF;
+  padding: 48px 0 44px;
+  border-bottom: 3px solid #000000;
+}
+
+.eyebrow {
+  display: inline-block;
+  background: #000000;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border: 2px solid #000000;
+  box-shadow: 3px 3px 0 #FFFFFF;
+}
+
+h1 {
+  font: 700 clamp(36px, 6vw, 60px)/1.05 var(--font-twitch);
+  margin: 14px 0 14px;
+  text-transform: uppercase;
+  color: #FFFFFF;
+  text-shadow: 4px 4px 0px #000000;
+}
+
+h1 em {
+  font-style: normal;
+  color: var(--green);
+  display: block;
+}
+
+.lede {
+  max-width: 62ch;
+  background: #0E0E10;
+  color: #FFFFFF;
+  padding: 10px 14px;
+  border: 3px solid var(--card-border);
+  box-shadow: 4px 4px 0 #000000;
+}
+
+.tool-wrapper {
+  margin-top: 30px;
+  background: #9146FF;
+  border: 3px solid var(--card-border);
+  box-shadow: 8px 8px 0 #000000;
+}
+
+.tool {
+  background: var(--panel);
+  color: var(--ink);
+  border: 3px solid var(--card-border);
+  margin: -3px;
+  padding: 24px;
+  will-change: transform;
+  transform: translate3d(-6px, -6px, 0);
+  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.tool-wrapper:hover .tool {
+  transform: translate3d(-2px, -2px, 0);
+}
+
+.tool h2 {
+  font: 700 28px/1.15 var(--font-twitch);
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0px #9146FF;
+  margin-bottom: 6px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.field span {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--green);
+  text-transform: uppercase;
+}
+:root[data-theme="light"] .field span {
+  color: #9146FF;
+}
+
+.drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 88px;
+  border: 3px dashed #9146FF;
+  background: var(--bg);
+  padding: 16px;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 4px 4px 0 #000000;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+.drop:hover {
+  border-color: var(--green);
+  transform: translate3d(2px, 2px, 0);
+  box-shadow: 2px 2px 0 #000000;
+}
+.drop input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.drop strong {
+  font-family: var(--font-twitch);
+  font-size: 18px;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-shadow: 2px 2px 0px #9146FF;
+}
+
+.quals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.quals button[aria-pressed="true"] {
+  background: var(--green);
+  color: #000000;
+  border-color: #000000;
+  box-shadow: 4px 4px 0 #9146FF;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 3px solid var(--card-border);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 10px 12px;
+  font: 700 15px var(--font-mono);
+  box-shadow: 4px 4px 0 #9146FF;
+}
+
+.ui-btn.full {
+  width: 100%;
+  height: 48px;
+  margin-top: 18px;
+  font-size: 16px;
+  background: #9146FF;
+  color: #FFFFFF;
+  border-color: var(--card-border);
+  box-shadow: 5px 5px 0 #000000;
+}
+.ui-btn.full:hover {
+  background: var(--green);
+  color: #000000;
+  border-color: #000000;
+  transform: translate3d(3px, 3px, 0);
+  box-shadow: 2px 2px 0 #000000;
+}
+
+.hint {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+/* =========================================================
+   STATS BAR & SECTIONS
+   ========================================================= */
+.stats {
+  background: var(--panel);
+  border-bottom: 3px solid #000000;
+}
+.stats .w {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 20px;
+  text-align: center;
+}
+.stats .w > div {
+  background: var(--bg);
+  border: 2px solid var(--card-border);
+  padding: 12px;
+  box-shadow: 4px 4px 0 #9146FF;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.stats .w > div:hover {
+  transform: translate3d(2px, 2px, 0);
+  box-shadow: 2px 2px 0 #9146FF;
+}
+.stats b {
+  display: block;
+  font: 700 26px/1.1 var(--font-twitch);
+  color: var(--ink);
+  text-shadow: 2px 2px 0px #9146FF;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+section {
+  padding: 56px 0;
+}
+.band {
+  background: var(--panel);
+  border-top: 3px solid #000000;
+  border-bottom: 3px solid #000000;
+}
+.lab {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: var(--green);
+  color: #000000;
+  padding: 4px 8px;
+  border: 2px solid #000000;
+  box-shadow: 3px 3px 0 #000000;
+  text-transform: uppercase;
+}
+
+h2.s {
+  font: 700 clamp(28px, 5vw, 42px)/1.12 var(--font-twitch);
+  margin: 12px 0 20px;
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0px #9146FF;
+}
+h2.s em {
+  font-style: normal;
+  color: var(--green);
+}
+:root[data-theme="light"] h2.s em {
+  color: #9146FF;
+}
+
+/* TABLE */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  background: var(--panel);
+  border: 3px solid var(--card-border);
+  box-shadow: 6px 6px 0 #9146FF;
+}
+th, td {
+  text-align: left;
+  padding: 12px;
+  border: 2px solid var(--card-border);
+  vertical-align: top;
+}
+th {
+  background: #9146FF;
+  color: #FFFFFF;
+  font-family: var(--font-twitch);
+  font-size: 15px;
+  text-transform: uppercase;
+}
+.ok { color: var(--green); font-weight: 800; text-transform: uppercase; }
+:root[data-theme="light"] .ok { color: #067647; }
+.wait { color: var(--yellow); font-weight: 800; text-transform: uppercase; }
+.bad { color: var(--red); font-weight: 800; text-transform: uppercase; }
+
+.steps {
+  margin-top: 16px;
+  padding-left: 20px;
+  max-width: 75ch;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+.steps li {
+  margin-bottom: 10px;
+}
+
+footer {
+  background: #000000;
+  color: #D4D4DC;
+  padding: 28px 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  border-top: 3px solid #9146FF;
+}
+
+/* =========================================================
+   PROGRESS BAR & MODAL INSIDE 360px × 360px TRUE CUBE
+   ========================================================= */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(14, 14, 16, 0.85);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.sheet[hidden] {
+  display: none;
+}
+
+.progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-stats {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.percentage-text {
+  font-family: var(--font-twitch);
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1;
+  text-shadow: 2px 2px 0px #9146FF;
+}
+
+.speed-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--green);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.progress-track {
+  width: 100%;
+  height: 22px;
+  background-color: #0E0E10;
+  border: 3px solid var(--card-border);
+  box-shadow: 3px 3px 0px #000000;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: repeating-linear-gradient(
+    -45deg,
+    #9146FF,
+    #9146FF 10px,
+    #772CE8 10px,
+    #772CE8 20px
+  );
+  border-right: 3px solid #000000;
+  transition: width 0.3s ease;
+}
+
+.progress-track.busy .progress-fill {
+  width: 38%;
+  animation: indet 1s ease-in-out infinite;
+}
+
+@keyframes indet {
+  from { margin-left: -38%; }
+  to { margin-left: 100%; }
+}
+
+.live-list {
+  list-style: none;
+  max-height: 48px;
+  overflow-y: auto;
+  background: #0E0E10;
+  border: 2px solid var(--card-border);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.live-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+}
+.live-list span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #D4D4DC;
+}
+
+.cube-btn-group {
+  display: flex;
+  gap: 6px;
+}
+.neobrutal-btn.compact {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+@media(max-width: 1100px) {
+  .stats .w { grid-template-columns: repeat(2, 1fr); }
+  .cube-grid { gap: 20px; }
+  .top .w { flex-wrap: wrap; row-gap: 8px; }
+}
+
+@media(max-width: 760px) {
+  .w { padding: 0 14px; }
+  .top .w { min-height: 0; padding-top: 10px; padding-bottom: 10px; }
+  .word { font-size: 20px; }
+  .hero, .ph { padding: 28px 0 24px; }
+  .tool { padding: 16px; }
+  section { padding: 36px 0; }
+  h1 { font-size: clamp(32px, 11vw, 48px); }
+  .stats .w { grid-template-columns: repeat(2, 1fr); }
+  .cube-neobrutal-wrapper,
+  .sheet .cube-neobrutal-wrapper { width: min(100%, 360px); height: auto; }
+  .cube-card { height: auto; min-height: 280px; }
+  .sheet { padding: 12px; overflow: auto; align-items: flex-start; }
+  .live-list { max-height: 72px; }
+  .ui-btn.full { height: 46px; }
+  thead { display: none; }
+  table, tbody, tr, td { display: block; width: 100%; }
+  tr { border-bottom: 3px solid var(--card-border); padding: 6px; }
+  td { border: 0; padding: 4px 8px; }
+  td::before {
+    content: attr(data-k);
+    display: block;
+    color: var(--green);
+    font-size: 11px;
+    font-weight: 700;
+  }
+}
+
+@media(prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top"><div class="w">
+  <a class="logo" href="#/home" aria-label="TwitchBatch, home">
+    <span class="twitch-neobrutal-wrapper" aria-hidden="true">
+      <svg class="twitch-svg" viewBox="-4 -4 32 32">
+        <!-- Stationary 3D Extrusion Base -->
+        <path class="twitch-base-layer" d="M6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0z"/>
+        <!-- Diagonal 3D Corner Connectors -->
+        <path class="twitch-base-layer" d="M1.714 4.286L6 0l4 0L6 4.286z M1.714 19.714h5.143L10.857 16H5.714z M6.857 24v-4.286l4-4V20z"/>
+        <!-- Pop-UP Front Twitch Logo Group -->
+        <g class="twitch-pop-group">
+          <path class="twitch-shell" d="M6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0z"/>
+          <path class="twitch-face" d="M20.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
+          <rect class="twitch-eye" x="11.571" y="4.714" width="1.715" height="5.143" />
+          <rect class="twitch-eye" x="16.286" y="4.714" width="1.714" height="5.143" />
+        </g>
+      </svg>
+    </span>
+    <span class="word">TWITCHBATCH</span>
+  </a>
+  <nav>
+    <a class="ui-btn ui-btn-outline" href="#/home">Home</a>
+    <a class="ui-btn ui-btn-outline" href="#/about">About</a>
+    <button class="theme ui-btn ui-btn-outline" id="theme" type="button" aria-pressed="false">Light mode</button>
+  </nav>
+</div></header>
+
+<div class="note"><div class="w">Download only videos you have the right to keep. Files save on the computer that is running TwitchBatch.</div></div>
+
+<main id="main" tabindex="-1">
+<div id="p-home">
+<div class="hero"><div class="w">
+  <div class="eyebrow">LOCAL · OPEN SOURCE · YOUR DOWNLOADS FOLDER</div>
+  <h1>Every Twitch link. <em>One batch.</em></h1>
+  <p class="lede">Upload a Word file. Pick one quality. Videos save on this computer, outside the project folder. A file that is already there is skipped.</p>
+  <div class="tool-wrapper">
+    <form class="tool" id="tool">
+      <h2>Download</h2>
+      <p class="hint">Only videos you have the right to keep. No login and no subscriber bypass.</p>
+      <label class="field"><span>WORD DOCUMENT</span>
+        <span class="drop"><input id="file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+          <strong id="file-label">Choose a .docx</strong></span>
+      </label>
+      <div class="field"><span>ONE QUALITY FOR EVERY VIDEO</span>
+        <div class="quals" role="group" aria-label="Quality for every video">
+          <button class="ui-btn ui-btn-outline" type="button" aria-pressed="true">1080p MP4</button>
+          <button class="ui-btn ui-btn-outline" type="button" aria-pressed="false">720p MP4</button>
+          <button class="ui-btn ui-btn-outline" type="button" aria-pressed="false">480p MP4</button>
+        </div>
+      </div>
+      <label class="field"><span>SAVE FOLDER</span>
+        <div class="row">
+          <input id="folder" value="Downloads" aria-label="Save folder" autocomplete="off">
+        </div>
+        <p class="hint" id="folder-hint">Starts as the Downloads folder of whoever is using this computer. A project folder is rejected.</p>
+      </label>
+      <button class="ui-btn full" id="go" type="submit">Download all</button>
+      <p class="hint" id="go-hint" role="status"></p>
+      <button class="ui-btn ui-btn-outline" id="reopen" type="button" hidden style="margin-top:12px">Show status</button>
+    </form>
+  </div>
+</div></div>
+
+<div class="stats"><div class="w">
+  <div><b>.docx</b>source file</div>
+  <div><b>1</b>quality</div>
+  <div><b>in order</b>one by one</div>
+  <div><b>local</b>not the repo</div>
+</div></div>
+
+<section><div class="w">
+  <div class="lab">A FINISHED RUN LOOKS LIKE THIS</div>
+  <h2 class="s">Saved, skipped, <em>or failed.</em></h2>
+  <table>
+    <thead><tr><th>#</th><th>URL</th><th>Status</th><th>Detail</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="hint" id="table-hint">Upload a .docx and the rows appear here. Refresh the page to stop a long video or a live stream. The partial file stays and can resume.</p>
+</div></section>
+
+<!-- 360px × 360px TRUE CUBE CARDS FOR "HOW IT WORKS" -->
+<section class="band"><div class="w">
+  <div class="lab">HOW IT WORKS</div>
+  <h2 class="s">Upload, choose, <em>save.</em></h2>
+  <div class="cube-grid">
+    <div class="cube-neobrutal-wrapper">
+      <div class="cube-card">
+        <div class="cube-header">
+          <div class="brand-title">STEP 01</div>
+          <span class="status-badge">.DOCX INPUT</span>
+        </div>
+        <div class="vod-info-box">
+          <div class="vod-label">SCANNER ENGINE</div>
+          <div class="vod-filename">Upload the document</div>
+          <div class="vod-meta"><span class="meta-tag">VODs</span><span class="meta-tag">Clips</span></div>
+        </div>
+        <p style="font-size:14px;color:var(--muted)">The page reads every Twitch video and clip link, including links hidden behind other words.</p>
+        <div class="cube-footer"><div class="batch-counter">STAGE: <strong>01 / 03</strong></div></div>
+      </div>
+    </div>
+
+    <div class="cube-neobrutal-wrapper">
+      <div class="cube-card">
+        <div class="cube-header">
+          <div class="brand-title">STEP 02</div>
+          <span class="status-badge">QUALITY</span>
+        </div>
+        <div class="vod-info-box">
+          <div class="vod-label">PRESET FORMAT</div>
+          <div class="vod-filename">One quality</div>
+          <div class="vod-meta"><span class="meta-tag">1080p MP4</span><span class="meta-tag">720p / 480p</span></div>
+        </div>
+        <p style="font-size:14px;color:var(--muted)">1080p, 720p, or 480p MP4. It applies to the whole list. It is not asked again for each link.</p>
+        <div class="cube-footer"><div class="batch-counter">STAGE: <strong>02 / 03</strong></div></div>
+      </div>
+    </div>
+
+    <div class="cube-neobrutal-wrapper">
+      <div class="cube-card">
+        <div class="cube-header">
+          <div class="brand-title">STEP 03</div>
+          <span class="status-badge">LOCAL DISK</span>
+        </div>
+        <div class="vod-info-box">
+          <div class="vod-label">STORAGE TARGET</div>
+          <div class="vod-filename">Files stay on PC</div>
+          <div class="vod-meta"><span class="meta-tag">yt-dlp + FFmpeg</span><span class="meta-tag">Auto Skip</span></div>
+        </div>
+        <p style="font-size:14px;color:var(--muted)">They go to the save folder. Finished videos are skipped. A broken link does not stop the rest.</p>
+        <div class="cube-footer"><div class="batch-counter">STAGE: <strong>03 / 03</strong></div></div>
+      </div>
+    </div>
+  </div>
+</div></section>
+</div>
+
+<!-- ABOUT PAGE WITH 360px × 360px TRUE CUBES -->
+<div id="p-about" hidden>
+<div class="ph"><div class="w">
+  <div class="eyebrow">ABOUT THIS OPEN SOURCE PROJECT</div>
+  <h1>A local batch downloader. <em>Your machine.</em></h1>
+  <p class="lede">Upload a .docx of Twitch links. TwitchBatch downloads them, in order, onto the computer that is running the server.</p>
+</div></div>
+<section><div class="w">
+  <div class="lab">WHAT IT IS</div>
+  <h2 class="s">Plain job. <em>Local files.</em></h2>
+  <div class="cube-grid">
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">INPUT</div><span class="status-badge">.DOCX</span></div>
+      <div class="vod-info-box"><div class="vod-label">DOCUMENT PARSER</div><div class="vod-filename">A Word file</div></div>
+      <p style="font-size:14px;color:var(--muted)">Save older .doc files as .docx first. The page finds VOD and clip links in the text, in tables, and in hyperlinks.</p>
+      <div class="cube-footer"><div class="batch-counter">MODULE: <strong>PARSER</strong></div></div>
+    </div></div>
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">ENGINE</div><span class="status-badge">CORE</span></div>
+      <div class="vod-info-box"><div class="vod-label">MEDIA PIPELINE</div><div class="vod-filename">yt-dlp + FFmpeg</div></div>
+      <p style="font-size:14px;color:var(--muted)">yt-dlp fetches the video. FFmpeg merges picture and sound into one MP4. Both stay on this machine.</p>
+      <div class="cube-footer"><div class="batch-counter">MODULE: <strong>MERGER</strong></div></div>
+    </div></div>
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">OUTPUT</div><span class="status-badge">LOCAL</span></div>
+      <div class="vod-info-box"><div class="vod-label">SAFE DIRECTORY</div><div class="vod-filename">Your folder</div></div>
+      <p style="font-size:14px;color:var(--muted)">The default is that person's Downloads folder. The project folder is refused, so the repo does not fill up with video.</p>
+      <div class="cube-footer"><div class="batch-counter">MODULE: <strong>STORAGE</strong></div></div>
+    </div></div>
+  </div>
+
+  <h2 class="s" style="margin-top:48px">The rules <em>it keeps.</em></h2>
+  <div class="cube-grid">
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">RULE 01</div><span class="status-badge">ETHICS</span></div>
+      <div class="vod-info-box"><div class="vod-label">NO BYPASS</div><div class="vod-filename">Rights first</div></div>
+      <p style="font-size:14px;color:var(--muted)">Download only videos you have the right to keep. The app does not log in, and it does not bypass a subscriber wall.</p>
+      <div class="cube-footer"><div class="batch-counter">RULE: <strong>STRICT</strong></div></div>
+    </div></div>
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">RULE 02</div><span class="status-badge">DEDUPE</span></div>
+      <div class="vod-info-box"><div class="vod-label">HASH CHECK</div><div class="vod-filename">No duplicates</div></div>
+      <p style="font-size:14px;color:var(--muted)">If the MP4 is already in the save folder, that link is marked already saved and left alone.</p>
+      <div class="cube-footer"><div class="batch-counter">RULE: <strong>SKIP EXISTING</strong></div></div>
+    </div></div>
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">RULE 03</div><span class="status-badge">SAFE</span></div>
+      <div class="vod-info-box"><div class="vod-label">PARTIAL RESUME</div><div class="vod-filename">Stop is safe</div></div>
+      <p style="font-size:14px;color:var(--muted)">Refreshing the page stops a long video or a live stream. The partial file remains so the next run can resume.</p>
+      <div class="cube-footer"><div class="batch-counter">RULE: <strong>RESUMABLE</strong></div></div>
+    </div></div>
+  </div>
+
+  <h2 class="s" style="margin-top:48px">Source <em>code.</em></h2>
+  <div class="cube-grid">
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">PROFILE</div><span class="status-badge">DEV</span></div>
+      <div class="vod-info-box"><div class="vod-label">AUTHOR</div><div class="vod-filename">GitHub</div></div>
+      <p><a href="https://github.com/Himanshu-5680">github.com/Himanshu-5680</a></p>
+      <div class="cube-footer"><div class="batch-counter">OPEN <strong>SOURCE</strong></div></div>
+    </div></div>
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">REPOS</div><span class="status-badge">CODE</span></div>
+      <div class="vod-info-box"><div class="vod-label">HOSTING</div><div class="vod-filename">Source code</div></div>
+      <p><a href="https://github.com/Himanshu-5680?tab=repositories">Himanshu-5680 on GitHub</a>. Publish this folder there when you host TwitchBatch.</p>
+      <div class="cube-footer"><div class="batch-counter">REPO: <strong>PUBLIC</strong></div></div>
+    </div></div>
+    <div class="cube-neobrutal-wrapper"><div class="cube-card">
+      <div class="cube-header"><div class="brand-title">ENGINE</div><span class="status-badge">CORE</span></div>
+      <div class="vod-info-box"><div class="vod-label">BACKEND</div><div class="vod-filename">yt-dlp</div></div>
+      <p>Video download uses <a href="https://github.com/yt-dlp/yt-dlp">yt-dlp</a>. FFmpeg merges the picture and sound into one MP4.</p>
+      <div class="cube-footer"><div class="batch-counter">CLI: <strong>ACTIVE</strong></div></div>
+    </div></div>
+  </div>
+
+  <h2 class="s" style="margin-top:48px">Known <em>limits.</em></h2>
+  <ol class="steps">
+    <li>Old binary .doc files are not read. Save them as .docx.</li>
+    <li>Private or login-only videos are out of scope.</li>
+    <li>A refresh clears the on-screen list. Upload the document again. Finished files are still skipped.</li>
+    <li>FFmpeg has to be installed separately. Without it, video and audio cannot be merged.</li>
+  </ol>
+</div></section>
+</div>
+</main>
+
+<footer><div class="w">TwitchBatch is an open-source local tool. Twitch is a trademark of its owner. This page is not an official Twitch product. <a href="#/about">About</a></div></footer>
+
+<!-- =========================================================
+     EXACT 360px × 360px TRUE CUBE DOWNLOAD STATUS CARD MODAL
+     ========================================================= -->
+<div class="sheet" id="sheet" hidden>
+  <div class="cube-neobrutal-wrapper" role="dialog" aria-modal="true" aria-labelledby="live-title">
+    <div class="cube-card">
+
+      <!-- Top Header -->
+      <div class="cube-header">
+        <div class="brand-title">
+          <svg class="mini-twitch-icon" viewBox="-4 -4 32 32">
+            <path class="twitch-base-layer" d="M6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0z"/>
+            <path class="twitch-base-layer" d="M1.714 4.286L6 0l4 0L6 4.286z M1.714 19.714h5.143L10.857 16H5.714z M6.857 24v-4.286l4-4V20z"/>
+            <g class="twitch-pop-group">
+              <path class="twitch-shell" d="M6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0z"/>
+              <path class="twitch-face" d="M20.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>
+              <rect class="twitch-eye" x="11.571" y="4.714" width="1.715" height="5.143" />
+              <rect class="twitch-eye" x="16.286" y="4.714" width="1.714" height="5.143" />
+            </g>
+          </svg>
+          BATCHCAST
+        </div>
+        <span class="status-badge" id="live-kicker">FETCHING</span>
+      </div>
+
+      <!-- VOD File Info -->
+      <div class="vod-info-box">
+        <div class="vod-label" id="live-title">SOURCE: LINKS_LIST.DOCX</div>
+        <div class="vod-filename" id="live-url">twitch.tv/videos/stream.mp4</div>
+        <div class="vod-meta">
+          <span class="meta-tag" id="cube-qual-tag">1080p MP4</span>
+          <span class="meta-tag">yt-dlp + FFmpeg</span>
+        </div>
+      </div>
+
+      <!-- Progress Bar -->
+      <div class="progress-section">
+        <div class="progress-stats">
+          <span class="percentage-text" id="live-pct">0%</span>
+          <span class="speed-text" id="live-meta">Starting…</span>
+        </div>
+        <div class="progress-track" id="live-track">
+          <span class="progress-fill" id="live-bar"></span>
+        </div>
+      </div>
+
+      <!-- Compact Live List -->
+      <ul class="live-list" id="live-list"></ul>
+
+      <!-- Footer with Batch Count + Interactive Pause/Resume & Close -->
+      <div class="cube-footer">
+        <div class="batch-counter">
+          BATCH: <strong id="batch-count">00 / 00</strong> DONE
+        </div>
+        <div class="cube-btn-group">
+          <button class="neobrutal-btn compact" id="actionBtn" type="button">PAUSE JOB</button>
+          <button class="neobrutal-btn compact" id="live-close" type="button">CLOSE</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const themeBtn=document.getElementById("theme");
+function applyTheme(theme){
+  const light=theme==="light";
+  if(light) document.documentElement.dataset.theme="light";
+  else delete document.documentElement.dataset.theme;
+  themeBtn.setAttribute("aria-pressed",light?"true":"false");
+  themeBtn.textContent=light?"Dark mode":"Light mode";
+  document.querySelector('meta[name="theme-color"]').setAttribute("content",light?"#F4F4F0":"#0E0E10");
+}
+applyTheme(localStorage.getItem("twitchbatch-theme")==="light"?"light":"dark");
+themeBtn.addEventListener("click",function(){
+  const next=document.documentElement.dataset.theme==="light"?"dark":"light";
+  localStorage.setItem("twitchbatch-theme",next);
+  applyTheme(next);
+});
+
+const pages=["home","about"];
+const titles={home:"TwitchBatch",about:"About — TwitchBatch"};
+function $(id){return document.getElementById(id)}
+function route(){
+  const name=location.hash.slice(2);
+  const page=pages.includes(name)?name:"home";
+  pages.forEach(function(item){$("p-"+item).hidden=item!==page});
+  document.querySelectorAll(".top nav a").forEach(function(link){
+    link.classList.toggle("on",link.getAttribute("href")==="#/"+page);
+  });
+  document.title=titles[page];
+  window.scrollTo(0,0);
+}
+addEventListener("hashchange",route);
+route();
+
+document.querySelectorAll(".quals button").forEach(function(button){
+  button.addEventListener("click",function(){
+    document.querySelectorAll(".quals button").forEach(function(other){other.setAttribute("aria-pressed","false")});
+    button.setAttribute("aria-pressed","true");
+    $("cube-qual-tag").textContent=button.textContent;
+  });
+});
+
+let links=[];
+let paused=false;
+
+/* Interactive Pause/Resume Toggle inside Cube */
+$("actionBtn").addEventListener("click",function(e){
+  e.stopPropagation();
+  paused=!paused;
+  const btn=$("actionBtn");
+  const badge=$("live-kicker");
+  const speed=$("live-meta");
+  fetch(paused?"/api/pause":"/api/resume",{method:"POST"}).catch(function(){});
+  if(paused){
+    btn.textContent="RESUME";
+    badge.textContent="PAUSED";
+    badge.style.backgroundColor="#FFB800";
+    speed.textContent="Paused. The file waits until you resume.";
+  }else{
+    btn.textContent="PAUSE JOB";
+    badge.textContent="FETCHING";
+    badge.style.backgroundColor="#00F593";
+    speed.textContent="Resuming job…";
+    poll();
+  }
+});
+
+function statusClass(status){
+  if(status==="done") return "ok";
+  if(status==="failed") return "bad";
+  return "wait";
+}
+function paintRows(rows){
+  const body=$("rows");
+  body.replaceChildren();
+  (rows||[]).forEach(function(row){
+    const tr=document.createElement("tr");
+    [["#",row.n],["URL",row.url],["Status",row.status],["Detail",row.detail||""]].forEach(function(pair){
+      const td=document.createElement("td");
+      td.dataset.k=pair[0];
+      if(pair[0]==="Status") td.className=statusClass(pair[1]);
+      if(pair[0]==="Detail"&&row.file){
+        const link=document.createElement("a");
+        link.href="/api/file?name="+encodeURIComponent(row.file);
+        link.textContent=pair[1]||row.file;
+        td.appendChild(link);
+      }else td.textContent=pair[1];
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+}
+function paintLive(job, open){
+  if(paused) return;
+  const rows=job.rows||[];
+  const doneCount=rows.filter(function(r){return r.status==="done"}).length;
+  const current=rows.find(function(row){return row.status==="downloading"})||rows.find(function(row){return row.status==="waiting"});
+  const pct=typeof job.fraction==="number"?Math.round(job.fraction*100):null;
+
+  const badge=$("live-kicker");
+  badge.textContent=job.running?"FETCHING":"BATCH";
+  badge.style.backgroundColor=job.running?"#00F593":"#9146FF";
+
+  const docName=$("file-label").textContent!=="Choose a .docx"?$("file-label").textContent:"LINKS_LIST.DOCX";
+  $("live-title").textContent=job.running?(current?"SOURCE: "+docName+" ("+current.n+"/"+rows.length+")":"SOURCE: "+docName):(job.message||"Finished");
+  $("live-url").textContent=current?String(current.url).replace(/^https?:\/\/(www\.)?/,""):"All links processed";
+  $("live-pct").textContent=pct===null?(job.running?"Working":"100%"):pct+"%";
+
+  const track=$("live-track");
+  if(pct===null&&job.running){track.classList.add("busy");$("live-bar").style.width=""}
+  else{track.classList.remove("busy");$("live-bar").style.width=(pct===null?0:pct)+"%"}
+
+  $("live-meta").textContent=(job.message||"").replace(/^Video \d+ of \d+ — /,"")||"yt-dlp + FFmpeg";
+  $("batch-count").textContent=String(doneCount).padStart(2,"0")+" / "+String(rows.length).padStart(2,"0");
+
+  const list=$("live-list");
+  list.replaceChildren();
+  rows.forEach(function(row){
+    const li=document.createElement("li");
+    const name=document.createElement("span");
+    name.textContent=row.n+". "+String(row.url).replace(/^https?:\/\/(www\.)?/,"");
+    const state=document.createElement("b");
+    state.className=statusClass(row.status);
+    state.textContent=row.detail&&row.status!=="waiting"&&row.status!=="downloading"?row.status+" · "+row.detail:row.status;
+    li.append(name,state);
+    list.appendChild(li);
+  });
+  if(open) $("sheet").hidden=false;
+  $("reopen").hidden=!$("sheet").hidden;
+}
+function poll(){
+  if(paused) return;
+  fetch("/api/job").then(function(res){return res.json()}).then(function(job){
+    if(job.rows) paintRows(job.rows);
+    if(job.message) $("go-hint").textContent=job.message;
+    if(!$("sheet").hidden) paintLive(job,false);
+    if(job.running && !paused) setTimeout(poll,700);
+    else if(job.rows&&job.rows.length) $("reopen").hidden=!$("sheet").hidden;
+  }).catch(function(){});
+}
+fetch("/api/health").then(function(res){return res.json()}).then(function(info){
+  if(info.folder && $("folder").value==="Downloads") $("folder").value=info.folder;
+  if(info.ffmpeg===false) $("go-hint").textContent="FFmpeg is not on PATH. Install it, then restart TwitchBatch.";
+}).catch(function(){});
+
+$("file").addEventListener("change",function(){
+  const file=$("file").files&&$("file").files[0];
+  $("file-label").textContent=file?file.name:"Choose a .docx";
+  if(!file) return;
+  $("go-hint").textContent="Reading the document…";
+  fetch("/api/extract",{
+    method:"POST",
+    headers:{"Content-Type":"application/octet-stream","X-Filename":encodeURIComponent(file.name)},
+    body:file
+  }).then(function(res){return res.json().then(function(data){return {ok:res.ok,data:data}})})
+    .then(function(result){
+      if(!result.ok){$("go-hint").textContent=result.data.error||"Could not read that file.";links=[];return}
+      links=result.data.links||[];
+      paintRows(links.map(function(url,index){return {n:index+1,url:url,status:"waiting",detail:""}}));
+      $("go-hint").textContent=links.length?links.length+" Twitch links found.":"No Twitch links were found.";
+    }).catch(function(){$("go-hint").textContent="Could not reach TwitchBatch.";});
+});
+
+$("tool").addEventListener("submit",function(event){
+  event.preventDefault();
+  if(!links.length){$("go-hint").textContent="Upload a .docx with Twitch links first.";return}
+  paused=false;
+  $("actionBtn").textContent="PAUSE JOB";
+  const chosen=document.querySelector('.quals button[aria-pressed="true"]');
+  if(chosen) $("cube-qual-tag").textContent=chosen.textContent;
+  const preview=links.map(function(url,index){return {n:index+1,url:url,status:"waiting",detail:""}});
+  paintRows(preview);
+  paintLive({running:true,message:"Starting…",fraction:null,rows:preview},true);
+  $("go-hint").textContent="Starting…";
+  fetch("/api/download",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({urls:links,quality:chosen?chosen.textContent:"1080p MP4",folder:$("folder").value})
+  }).then(function(res){return res.json().then(function(data){return {ok:res.ok,data:data}})})
+    .then(function(result){
+      if(!result.ok){
+        const message=result.data.error||"Could not start.";
+        $("go-hint").textContent=message;
+        paintLive({running:false,message:message,fraction:null,rows:preview},true);
+        return;
+      }
+      poll();
+    }).catch(function(){
+      $("go-hint").textContent="Could not reach TwitchBatch.";
+      paintLive({running:false,message:"Could not reach TwitchBatch.",fraction:null,rows:preview},true);
+    });
+});
+$("live-close").addEventListener("click",function(){$("sheet").hidden=true;$("reopen").hidden=false});
+$("sheet").addEventListener("click",function(event){if(event.target===$("sheet")){$("sheet").hidden=true;$("reopen").hidden=false}});
+$("reopen").addEventListener("click",function(){ $("sheet").hidden=false;$("reopen").hidden=true; poll(); });
+addEventListener("pagehide",function(){navigator.sendBeacon("/api/cancel");});
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# App secrets and local downloads
+.env
+.streamlit/secrets.toml
+downloads/*
+!downloads/.gitkeep
+*.mp4
+*.part
+*.ytdl
+
+# Build output. Rebuild the exe from the repo; do not commit it.
+build/
+dist/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

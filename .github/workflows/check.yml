@@ -1,0 +1,21 @@
+name: Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compile
+        run: python -m compileall -q server.py downloader.py link_extractor.py formats.py app.py
+      - name: Read a sample Word file
+        run: |
+          python -c "from io import BytesIO; from pathlib import Path; from docx import Document; from link_extractor import extract_twitch_links; from server import folder_error; buf=BytesIO(); doc=Document(); doc.add_paragraph('https://www.twitch.tv/videos/123 and https://clips.twitch.tv/Abc'); doc.save(buf); buf.seek(0); links=extract_twitch_links(buf); assert links==['https://www.twitch.tv/videos/123','https://clips.twitch.tv/Abc'], links; assert folder_error(str(Path('.').resolve())); print('ok')"
