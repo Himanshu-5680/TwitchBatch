@@ -134,6 +134,15 @@ def _canonical(value: str) -> str | None:
     return urlunsplit(("https", host, path, "", ""))
 
 
+def one_twitch_url(value: str) -> str | None:
+    """Return a clean Twitch URL when `value` itself starts with one."""
+    text = (value or "").strip()
+    match = _TWITCH_URL.search(text)
+    if match is None or match.start() != 0:
+        return None
+    return _canonical(text)
+
+
 def _unique(urls) -> list[str]:
     """Drop empty values and repeats, keeping the first occurrence."""
     ordered: dict[str, None] = {}

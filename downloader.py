@@ -5,6 +5,7 @@ a fraction from 0 to 1, or None when the file size is still unknown.
 """
 
 import shutil
+import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -147,6 +148,8 @@ def download_one(
         "socket_timeout": 30,
         "ffmpeg_location": str(Path(ffmpeg).parent),
         "progress_hooks": [hook],
+        # A second pass puts the movie header at the start, so players can seek.
+        "postprocessor_args": {"ffmpeg": ["-movflags", "+faststart"]},
     }
 
     with YoutubeDL(options) as ydl:
@@ -165,6 +168,179 @@ def download_one(
     if path is None:
         raise DownloadError("yt-dlp finished without writing a file.")
     return DownloadResult(path)
+
+
+def _ffmpeg_headers(headers: dict) -> str:
+    lines = []
+    for key, value in headers.items():
+        key_text = str(key)
+        value_text = str(value)
+        if not key_text or any(char in key_text or char in value_text for char in "\r\n"):
+            continue
+        lines.append(f"{key_text}: {value_text}")
+    if not lines:
+        return ""
+    return "\r\n".join(lines) + "\r\n"
+
+
+def parse_playlist(text: str, base: str) -> tuple[str | None, list[tuple[float, float]]]:
+    """Read one HLS playlist.
+
+    A master playlist returns the chosen variant URL and no segments.
+    A media playlist returns each segment's start time and duration.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if any(line.startswith("#EXT-X-STREAM-INF") for line in lines):
+        chosen = ""
+        for index, line in enumerate(lines):
+            if line.startswith("#EXT-X-STREAM-INF") and index + 1 < len(lines):
+                chosen = lines[index + 1]
+        if not chosen or chosen.startswith("#"):
+            raise DownloadError("The playlist has no media stream.")
+        return (chosen if chosen.startswith("http") else base + chosen), []
+
+    segments: list[tuple[float, float]] = []
+    clock = 0.0
+    pending: float | None = None
+    for line in lines:
+        if line.startswith("#EXTINF:"):
+            raw = line.split(":", 1)[1].split(",", 1)[0]
+            try:
+                pending = float(raw)
+            except ValueError:
+                pending = 4.0
+        elif not line.startswith("#") and pending is not None:
+            segments.append((clock, pending))
+            clock += pending
+            pending = None
+    if not segments:
+        raise DownloadError("The playlist has no segments.")
+    return None, segments
+
+
+def _fetch_text(url: str, headers: dict) -> str:
+    clean = {
+        str(key): str(value)
+        for key, value in headers.items()
+        if str(key) and "\r" not in str(key) and "\n" not in str(key) + str(value)
+    }
+    clean.setdefault("User-Agent", "Mozilla/5.0")
+    request = urllib.request.Request(url, headers=clean)
+    with urllib.request.urlopen(request, timeout=20) as response:
+        return response.read().decode("utf-8", "replace")
+
+
+def timeline_from_info(info: dict) -> list[tuple[float, float]]:
+    """Segment start times for an exact progress count. Falls back to 15-minute blocks."""
+    formats = info.get("requested_formats") or []
+    source = formats[0] if formats else info
+    media = str(source.get("url") or "")
+    headers = source.get("http_headers") or info.get("http_headers") or {}
+    protocol = str(source.get("protocol") or info.get("protocol") or "")
+    if "m3u8" in media or "m3u8" in protocol:
+        url = media
+        for _ in range(4):
+            base = url.rsplit("/", 1)[0] + "/"
+            variant, segments = parse_playlist(_fetch_text(url, headers), base)
+            if variant is None:
+                return segments
+            url = variant
+    duration = float(info.get("duration") or 0)
+    if duration <= 0:
+        return [(0.0, 900.0)]
+    blocks: list[tuple[float, float]] = []
+    cursor = 0.0
+    while cursor < duration:
+        span = min(900.0, duration - cursor)
+        blocks.append((cursor, span))
+        cursor += span
+    return blocks
+
+
+def chunk_command(info: dict, start: float, length: float) -> list[str]:
+    """Mux one time window to stdout as MPEG-TS.
+
+    MPEG-TS can be appended on disk. A second fragmented MP4 cannot.
+    `-c copy` does not re-encode, so a 15-minute window stays a short transfer.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise FFmpegMissingError(
+            "FFmpeg is not on PATH. Install it, then restart TwitchBatch."
+        )
+    formats = info.get("requested_formats") or []
+    inputs = formats[:2] if len(formats) >= 2 else [info]
+    command = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+    ]
+    for fmt in inputs:
+        media = fmt.get("url")
+        if not media:
+            raise DownloadError("yt-dlp did not return a stream URL.")
+        if start > 0:
+            command.extend(["-ss", f"{start:.3f}"])
+        if length > 0:
+            command.extend(["-t", f"{length:.3f}"])
+        blob = _ffmpeg_headers(fmt.get("http_headers") or info.get("http_headers") or {})
+        if blob:
+            command.extend(["-headers", blob])
+        command.extend(["-i", media])
+    command.extend(["-c", "copy", "-f", "mpegts", "pipe:1"])
+    return command
+
+
+def ts_pipe_command(info: dict) -> list[str]:
+    """Stream the whole file as MPEG-TS.
+
+    A piped MP4 has no finished moov index, so players cannot seek it.
+    MPEG-TS carries timestamps in the stream, and VLC can seek the saved .ts file.
+    """
+    return chunk_command(info, 0, 0)
+
+
+def ts_pipe_command(info: dict) -> list[str]:
+    """Mux a whole video to stdout as MPEG-TS. Nothing is written on this machine.
+
+    A piped MP4 has no sample index, so players cannot seek it. MPEG-TS carries
+    timestamps in the stream itself, which is why VLC can seek the saved .ts file.
+    """
+    return chunk_command(info, 0, 0)
+
+
+def pipe_command(info: dict) -> list[str]:
+    """Build an ffmpeg command that muxes to stdout and does not write an MP4.
+
+    `-c copy` keeps Twitch's H.264 and AAC as they are. The frag flags let the
+    browser play the file while it is still arriving.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise FFmpegMissingError(
+            "FFmpeg is not on PATH. Install it, then restart TwitchBatch."
+        )
+    formats = info.get("requested_formats") or []
+    inputs = formats[:2] if len(formats) >= 2 else [info]
+    command = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
+    for fmt in inputs:
+        media = fmt.get("url")
+        if not media:
+            raise DownloadError("yt-dlp did not return a stream URL.")
+        blob = _ffmpeg_headers(fmt.get("http_headers") or info.get("http_headers") or {})
+        command.extend(["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"])
+        if blob:
+            command.extend(["-headers", blob])
+        command.extend(["-i", media])
+    command.extend(
+        [
+            "-c", "copy",
+            "-bsf:a", "aac_adtstoasc",
+            "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+            "-f", "mp4",
+            "pipe:1",
+        ]
+    )
+    return command
 
 
 def _located(filepath: str, destination: Path) -> Path:

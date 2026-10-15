@@ -975,9 +975,10 @@ footer {
         <div class="row">
           <input id="folder" value="Downloads" aria-label="Save folder" autocomplete="off">
         </div>
-        <p class="hint" id="folder-hint">Starts as the Downloads folder of whoever is using this computer. A project folder is rejected.</p>
+        <p class="hint" id="folder-hint">On this PC the MP4 is written into the folder below and players can seek it. On the hosted site, a short clip is a normal MP4. A long VOD is a .ts file, which VLC can seek. Chrome or Edge asks for a folder when you click.</p>
       </label>
       <button class="ui-btn full" id="go" type="submit">Download all</button>
+      <p class="hint">A long batch is more reliable with <a href="https://github.com/Himanshu-5680/TwitchBatch">TwitchBatch.exe on this PC</a>. That copy can write a normal MP4.</p>
       <p class="hint" id="go-hint" role="status"></p>
       <button class="ui-btn ui-btn-outline" id="reopen" type="button" hidden style="margin-top:12px">Show status</button>
     </form>
@@ -1083,7 +1084,7 @@ footer {
     <div class="cube-neobrutal-wrapper"><div class="cube-card">
       <div class="cube-header"><div class="brand-title">OUTPUT</div><span class="status-badge">LOCAL</span></div>
       <div class="vod-info-box"><div class="vod-label">SAFE DIRECTORY</div><div class="vod-filename">Your folder</div></div>
-      <p style="font-size:14px;color:var(--muted)">The default is that person's Downloads folder. The project folder is refused, so the repo does not fill up with video.</p>
+      <p style="font-size:14px;color:var(--muted)">On this PC, FFmpeg writes a normal MP4 into the folder you chose. On a hosted site, a short clip is built, sent, and deleted. A long VOD is streamed as .ts and is not stored on the server.</p>
       <div class="cube-footer"><div class="batch-counter">MODULE: <strong>STORAGE</strong></div></div>
     </div></div>
   </div>
@@ -1252,6 +1253,7 @@ document.querySelectorAll(".quals button").forEach(function(button){
 
 let links=[];
 let paused=false;
+let isCloud=false;
 
 /* Interactive Pause/Resume Toggle inside Cube */
 $("actionBtn").addEventListener("click",function(e){
@@ -1349,8 +1351,11 @@ function poll(){
   }).catch(function(){});
 }
 fetch("/api/health").then(function(res){return res.json()}).then(function(info){
-  if(info.folder && $("folder").value==="Downloads") $("folder").value=info.folder;
+  isCloud=!!info.cloud;
+  if(!isCloud && info.folder && $("folder").value==="Downloads") $("folder").value=info.folder;
+  if(isCloud) $("folder").value="Picked when you click Download all";
   if(info.ffmpeg===false) $("go-hint").textContent="FFmpeg is not on PATH. Install it, then restart TwitchBatch.";
+  else if(isCloud) $("go-hint").textContent="Short clips save as MP4. Long VODs save as .ts. Open those in VLC. For a normal MP4, run TwitchBatch.exe on this PC.";
 }).catch(function(){});
 
 $("file").addEventListener("change",function(){
@@ -1371,13 +1376,427 @@ $("file").addEventListener("change",function(){
     }).catch(function(){$("go-hint").textContent="Could not reach TwitchBatch.";});
 });
 
+function sleep(ms){return new Promise(function(resolve){setTimeout(resolve,ms)})}
+async function waitStream(index){
+  const start=Date.now();
+  let saw=false;
+  while(Date.now()-start<100*60*1000){
+    const job=await fetch("/api/job").then(function(res){return res.json()});
+    const row=job.rows&&job.rows[index];
+    if(job.rows) paintRows(job.rows);
+    if(!$("sheet").hidden) paintLive(job,false);
+    if(job.streaming) saw=true;
+    if(row&&(row.status==="done"||row.status==="failed"||row.status==="stopped")) return row;
+    if(!saw&&Date.now()-start>15000){
+      return {status:"failed",detail:"The browser blocked this download. Allow multiple downloads, then try again."};
+    }
+    await sleep(800);
+  }
+  return {status:"failed",detail:"This stream ran longer than the host keeps one connection open."};
+}
+async function startDirectPcBatch(urls,quality){
+  const go=$("go");
+  go.disabled=true;
+  paused=false;
+  $("actionBtn").textContent="PAUSE JOB";
+  const preview=urls.map(function(url,index){return {n:index+1,url:url,status:"waiting",detail:"Queued"}});
+  paintRows(preview);
+  paintLive({running:true,message:"Saving to your PC…",fraction:0,rows:preview},true);
+  $("go-hint").textContent="Saving to your PC…";
+  try{
+    const queued=await fetch("/api/download",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({urls:urls,quality:quality})
+    });
+    const queuedBody=await queued.json();
+    if(!queued.ok){
+      $("go-hint").textContent=queuedBody.error||"Could not start.";
+      paintLive({running:false,message:queuedBody.error||"Could not start.",fraction:null,rows:preview},true);
+      return;
+    }
+    for(let i=0;i<urls.length;i++){
+      while(paused) await sleep(400);
+      const opened=await fetch("/api/open",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({n:i})
+      });
+      const openedBody=await opened.json();
+      if(!opened.ok){
+        preview[i].status="failed";
+        preview[i].detail=openedBody.error||"Could not open that stream.";
+        paintRows(preview);
+        continue;
+      }
+      const save=document.createElement("a");
+      save.href="/api/stream?n="+i;
+      save.download=openedBody.file||"";
+      document.body.appendChild(save);
+      save.click();
+      save.remove();
+      const row=await waitStream(i);
+      if(row.status==="failed"&&/blocked/i.test(row.detail||"")){
+        await fetch("/api/fail",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({n:i,detail:row.detail})});
+        break;
+      }
+    }
+  }catch(err){
+    $("go-hint").textContent="Could not reach TwitchBatch.";
+  }finally{
+    go.disabled=false;
+    const job=await fetch("/api/job").then(function(res){return res.json()}).catch(function(){return null});
+    if(job){
+      if(job.rows) paintRows(job.rows);
+      paintLive(job,true);
+      if(job.message) $("go-hint").textContent=job.message;
+    }
+  }
+}
+async function runZeroDiskPcBatch(urls, quality){
+  if(!window.showDirectoryPicker){
+    $("go-hint").textContent="Use Chrome or Edge. This save path needs the folder picker.";
+    return;
+  }
+  let dirHandle;
+  try{
+    dirHandle=await window.showDirectoryPicker({mode:"readwrite"});
+  }catch(err){
+    $("go-hint").textContent="Folder permission is required to save directly to your PC.";
+    return;
+  }
+  const go=$("go");
+  go.disabled=true;
+  paused=false;
+  $("actionBtn").textContent="PAUSE JOB";
+  const rows=urls.map(function(url,index){return {n:index+1,url:url,status:"waiting",detail:""}});
+  paintRows(rows);
+  paintLive({running:true,message:"Checking the folder on this PC…",fraction:0,rows:rows},true);
+  const windowSeconds=900;
+  try{
+    for(let i=0;i<urls.length;i++){
+      while(paused) await sleep(400);
+      const current=rows[i];
+      current.status="downloading";
+      current.detail="Checking this PC…";
+      paintRows(rows);
+      const metaRes=await fetch("/api/meta?url="+encodeURIComponent(current.url)+"&quality="+encodeURIComponent(quality));
+      const meta=await metaRes.json();
+      if(!metaRes.ok){
+        current.status="failed";
+        current.detail=meta.error||"Could not read that video.";
+        paintRows(rows);
+        continue;
+      }
+      const filename=String(meta.filename||"").replace(/[\\/]/g,"");
+      if(!filename){current.status="failed";current.detail="No filename.";paintRows(rows);continue}
+      try{
+        const existing=await dirHandle.getFileHandle(filename,{create:false});
+        const existingFile=await existing.getFile();
+        if(existingFile.size>0){
+          current.status="done";
+          current.detail="already saved ("+filename+")";
+          paintRows(rows);
+          paintLive({running:true,message:"Skipped. Already on this PC.",fraction:1,rows:rows},false);
+          continue;
+        }
+      }catch(err){}
+      const resumeKey="tb_part_"+filename;
+      let resume=null;
+      try{resume=JSON.parse(localStorage.getItem(resumeKey)||"null")}catch(err){resume=null}
+      const partHandle=await dirHandle.getFileHandle(filename+".part",{create:true});
+      const partFile=await partHandle.getFile();
+      let startSec=0;
+      let savedBytes=0;
+      if(resume&&resume.bytes>0&&partFile.size>=resume.bytes){
+        startSec=Number(resume.start)||0;
+        savedBytes=Number(resume.bytes)||0;
+      }else{
+        localStorage.removeItem(resumeKey);
+      }
+      const writable=await partHandle.createWritable({keepExistingData:true});
+      await writable.truncate(savedBytes);
+      if(savedBytes>0) await writable.seek(savedBytes);
+      const duration=Number(meta.duration)||0;
+      const estimated=Number(meta.est_bytes)||0;
+      let lastTime=performance.now();
+      let bytesInWindow=0;
+      let safeBytes=savedBytes;
+      try{
+        let guard=0;
+        while(guard<48){
+          guard+=1;
+          if(duration&&startSec>=duration-0.5) break;
+          while(paused) await sleep(400);
+          const length=duration?Math.max(1,Math.min(windowSeconds,duration-startSec)):windowSeconds;
+          const checkpoint=savedBytes;
+          const streamRes=await fetch("/api/stream_chunk?url="+encodeURIComponent(current.url)+"&quality="+encodeURIComponent(quality)+"&start="+startSec+"&length="+length);
+          if(streamRes.status===409){await sleep(1000);guard-=1;continue}
+          if(!streamRes.ok){
+            const body=await streamRes.json().catch(function(){return {}});
+            throw new Error(body.error||"Stream failed");
+          }
+          const reader=streamRes.body.getReader();
+          let got=0;
+          while(true){
+            while(paused) await sleep(400);
+            const piece=await reader.read();
+            if(piece.done) break;
+            await writable.write(piece.value);
+            got+=piece.value.byteLength;
+            savedBytes+=piece.value.byteLength;
+            bytesInWindow+=piece.value.byteLength;
+            const now=performance.now();
+            if(now-lastTime>500){
+              const mbps=((bytesInWindow/(1024*1024))/((now-lastTime)/1000)).toFixed(1);
+              const totalMb=(savedBytes/(1024*1024)).toFixed(0);
+              const fraction=estimated?Math.min(0.99,savedBytes/estimated):(duration?Math.min(0.99,startSec/duration):null);
+              current.detail=totalMb+" MB written";
+              paintRows(rows);
+              paintLive({running:true,message:mbps+" MB/s • "+totalMb+" MB",fraction:fraction,rows:rows},false);
+              lastTime=now;
+              bytesInWindow=0;
+            }
+          }
+          if(!got) break;
+          startSec+=length;
+          safeBytes=savedBytes;
+          localStorage.setItem(resumeKey,JSON.stringify({start:startSec,bytes:safeBytes}));
+          if(!duration&&got<188*32) break;
+        }
+      }catch(err){
+        try{await writable.truncate(safeBytes)}catch(ignore){}
+        try{await writable.close()}catch(ignore){}
+        current.status="failed";
+        current.detail="Interrupted. The next run resumes this file.";
+        paintRows(rows);
+        continue;
+      }
+      await writable.close();
+      const finalHandle=await dirHandle.getFileHandle(filename,{create:true});
+      const finalWritable=await finalHandle.createWritable();
+      await (await partHandle.getFile()).stream().pipeTo(finalWritable);
+      await dirHandle.removeEntry(filename+".part");
+      localStorage.removeItem(resumeKey);
+      current.status="done";
+      current.detail=filename;
+      paintRows(rows);
+    }
+  }catch(err){
+    $("go-hint").textContent="Could not reach TwitchBatch.";
+  }finally{
+    go.disabled=false;
+    paintLive({running:false,message:"Finished. Files are in the folder you picked.",fraction:1,rows:rows},false);
+    paintRows(rows);
+  }
+}
+function offerSave(file, name){
+  const url=URL.createObjectURL(file);
+  const link=document.createElement("a");
+  link.href=url;
+  link.download=name;
+  document.body.appendChild(link);
+  link.click();
+  const button=document.createElement("button");
+  button.type="button";
+  button.className="ui-btn";
+  button.textContent="Save "+name+" to Downloads";
+  button.addEventListener("click",function(){link.click()});
+  $("go-hint").appendChild(document.createElement("br"));
+  $("go-hint").appendChild(button);
+}
+async function downloadWithUniversalOPFS(urls, quality){
+  if(!navigator.storage||!navigator.storage.getDirectory){
+    $("go-hint").textContent="This browser cannot keep the video on disk.";
+    return;
+  }
+  try{await navigator.storage.persist()}catch(err){}
+  const root=await navigator.storage.getDirectory();
+  const go=$("go");
+  go.disabled=true;
+  paused=false;
+  $("actionBtn").textContent="PAUSE JOB";
+  $("go-hint").textContent="Saving through this browser…";
+  const rows=urls.map(function(url,index){return {n:index+1,url:url,status:"waiting",detail:""}});
+  paintRows(rows);
+  paintLive({running:true,message:"Reading the segment list…",fraction:0,rows:rows},true);
+  try{
+    for(let i=0;i<urls.length;i++){
+      while(paused) await sleep(400);
+      const current=rows[i];
+      current.status="downloading";
+      current.detail="Reading segments…";
+      paintRows(rows);
+      const metaRes=await fetch("/api/vod_manifest?url="+encodeURIComponent(current.url)+"&quality="+encodeURIComponent(quality));
+      const manifest=await metaRes.json();
+      if(!metaRes.ok){
+        current.status="failed";
+        current.detail=manifest.error||"Could not read that video.";
+        paintRows(rows);
+        continue;
+      }
+      const filename=String(manifest.filename||"").replace(/[\\/]/g,"");
+      const total=Number(manifest.total_segments)||0;
+      if(!filename||total<1){
+        current.status="failed";
+        current.detail="No segments were found.";
+        paintRows(rows);
+        continue;
+      }
+      const resumeKey="tb_seg_"+filename;
+      let state=null;
+      try{state=JSON.parse(localStorage.getItem(resumeKey)||"null")}catch(err){state=null}
+      const partHandle=await root.getFileHandle(filename+".part",{create:true});
+      const partFile=await partHandle.getFile();
+      let index=0;
+      let safeBytes=0;
+      if(state&&state.bytes>0&&state.index>0&&partFile.size>=state.bytes){
+        index=Math.min(total,Number(state.index)||0);
+        safeBytes=Number(state.bytes)||0;
+      }else{
+        localStorage.removeItem(resumeKey);
+      }
+      const writable=await partHandle.createWritable({keepExistingData:true});
+      await writable.truncate(safeBytes);
+      if(safeBytes>0) await writable.seek(safeBytes);
+      try{
+        for(let segment=index;segment<total;segment++){
+          while(paused) await sleep(400);
+          const segRes=await fetch("/api/segment_window?manifest="+encodeURIComponent(manifest.manifest)+"&index="+segment);
+          if(segRes.status===409){await sleep(800);segment-=1;continue}
+          if(!segRes.ok){
+            const body=await segRes.json().catch(function(){return {}});
+            throw new Error(body.error||"Segment failed");
+          }
+          const reader=segRes.body.getReader();
+          let got=0;
+          while(true){
+            while(paused) await sleep(400);
+            const piece=await reader.read();
+            if(piece.done) break;
+            await writable.write(piece.value);
+            got+=piece.value.byteLength;
+          }
+          if(!got) throw new Error("Empty segment");
+          safeBytes+=got;
+          localStorage.setItem(resumeKey,JSON.stringify({index:segment+1,bytes:safeBytes}));
+          const fraction=(segment+1)/total;
+          current.detail="Segment "+(segment+1)+" / "+total;
+          paintRows(rows);
+          paintLive({running:true,message:"Exact: "+(segment+1)+"/"+total+" segments",fraction:fraction,rows:rows},false);
+        }
+      }catch(err){
+        try{await writable.truncate(safeBytes)}catch(ignore){}
+        try{await writable.close()}catch(ignore){}
+        current.status="failed";
+        current.detail="Interrupted. The next run continues from the last finished segment.";
+        paintRows(rows);
+        continue;
+      }
+      await writable.close();
+      const finished=await partHandle.getFile();
+      offerSave(finished, filename);
+      localStorage.removeItem(resumeKey);
+      setTimeout(function(){root.removeEntry(filename+".part").catch(function(){})},120000);
+      current.status="done";
+      current.detail=filename;
+      paintRows(rows);
+    }
+  }catch(err){
+    $("go-hint").textContent="Could not reach TwitchBatch.";
+  }finally{
+    go.disabled=false;
+    paintRows(rows);
+    paintLive({running:false,message:"Finished. Save any file the browser did not start.",fraction:1,rows:rows},false);
+  }
+}
+async function runCloudDirectToFolder(urls, quality){
+  if(!window.showDirectoryPicker){
+    $("go-hint").textContent="Firefox and Safari cannot pick a folder. Use Chrome or Edge, or run TwitchBatch.exe on this PC.";
+    return;
+  }
+  let dirHandle;
+  try{
+    dirHandle=await window.showDirectoryPicker({mode:"readwrite"});
+  }catch(err){
+    $("go-hint").textContent="Folder permission cancelled.";
+    return;
+  }
+  const rows=urls.map(function(url,index){return {n:index+1,url:url,status:"waiting",detail:""}});
+  paintRows(rows);
+  paintLive({running:true,message:"Saving into the folder you picked…",fraction:0,rows:rows},true);
+  for(let i=0;i<urls.length;i++){
+    while(paused) await sleep(400);
+    const row=rows[i];
+    row.status="downloading";
+    paintRows(rows);
+    try{
+      const res=await fetch("/api/cloud_stream?url="+encodeURIComponent(row.url)+"&quality="+encodeURIComponent(quality));
+      if(!res.ok){
+        const body=await res.json().catch(function(){return {}});
+        throw new Error(body.error||"Stream failed");
+      }
+      const filename=(res.headers.get("X-Video-Filename")||("twitch_"+(i+1)+".ts")).replace(/[\\/]/g,"");
+      const container=res.headers.get("X-Container")||"";
+      const estimated=Number(res.headers.get("Content-Length")||res.headers.get("X-Est-Bytes")||0);
+      try{
+        const existing=await dirHandle.getFileHandle(filename,{create:false});
+        if((await existing.getFile()).size>0){
+          await res.body.cancel();
+          row.status="done";
+          row.detail="already saved ("+filename+")";
+          paintRows(rows);
+          continue;
+        }
+      }catch(err){}
+      const fileHandle=await dirHandle.getFileHandle(filename,{create:true});
+      const writable=await fileHandle.createWritable();
+      const reader=res.body.getReader();
+      let written=0;
+      let lastTick=performance.now();
+      let windowBytes=0;
+      while(true){
+        while(paused) await sleep(400);
+        const piece=await reader.read();
+        if(piece.done) break;
+        await writable.write(piece.value);
+        written+=piece.value.byteLength;
+        windowBytes+=piece.value.byteLength;
+        const now=performance.now();
+        if(now-lastTick>500){
+          const mbps=((windowBytes/(1024*1024))/((now-lastTick)/1000)).toFixed(1);
+          const totalMb=(written/(1024*1024)).toFixed(0);
+          const fraction=estimated?Math.min(0.99,written/estimated):null;
+          row.detail=totalMb+" MB saved";
+          paintRows(rows);
+          paintLive({running:true,message:mbps+" MB/s • "+totalMb+" MB",fraction:fraction,rows:rows},false);
+          lastTick=now;
+          windowBytes=0;
+        }
+      }
+      await writable.close();
+      row.status="done";
+      row.detail=container==="mpegts"?filename+" · open in VLC to seek":filename;
+    }catch(err){
+      row.status="failed";
+      row.detail=err&&err.message?err.message:"Stream interrupted.";
+    }
+    paintRows(rows);
+  }
+  paintLive({running:false,message:"Finished. Files are in the folder you picked.",fraction:1,rows:rows},false);
+}
 $("tool").addEventListener("submit",function(event){
   event.preventDefault();
   if(!links.length){$("go-hint").textContent="Upload a .docx with Twitch links first.";return}
   paused=false;
   $("actionBtn").textContent="PAUSE JOB";
   const chosen=document.querySelector('.quals button[aria-pressed="true"]');
-  if(chosen) $("cube-qual-tag").textContent=chosen.textContent;
+  const qualityText=chosen?chosen.textContent:"1080p MP4";
+  if(chosen) $("cube-qual-tag").textContent=qualityText;
+  if(isCloud){
+    runCloudDirectToFolder(links, qualityText);
+    return;
+  }
   const preview=links.map(function(url,index){return {n:index+1,url:url,status:"waiting",detail:""}});
   paintRows(preview);
   paintLive({running:true,message:"Starting…",fraction:null,rows:preview},true);
@@ -1385,7 +1804,7 @@ $("tool").addEventListener("submit",function(event){
   fetch("/api/download",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({urls:links,quality:chosen?chosen.textContent:"1080p MP4",folder:$("folder").value})
+    body:JSON.stringify({urls:links,quality:qualityText,folder:$("folder").value})
   }).then(function(res){return res.json().then(function(data){return {ok:res.ok,data:data}})})
     .then(function(result){
       if(!result.ok){
